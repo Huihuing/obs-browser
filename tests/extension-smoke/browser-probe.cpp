@@ -18,10 +18,12 @@ public:
 		if (title.ToString().starts_with("Content script:")) {
 			std::cout << title.ToString() << std::endl;
 			// Chromium is notifying WebContents observers in this callback.
-			CefPostTask(TID_UI, base::BindOnce([](CefRefPtr<CefBrowser> finished) {
-				finished->GetHost()->WasHidden(true);
-				finished->GetHost()->CloseBrowser(true);
-			}, browser));
+			CefPostTask(TID_UI, base::BindOnce(
+						    [](CefRefPtr<CefBrowser> finished) {
+							    finished->GetHost()->WasHidden(true);
+							    finished->GetHost()->CloseBrowser(true);
+						    },
+						    browser));
 		}
 	}
 	void OnBeforeClose(CefRefPtr<CefBrowser>) override
@@ -44,8 +46,9 @@ public:
 		window.windowless_rendering_enabled = true;
 		auto browser = CefBrowserHost::CreateBrowserSync(window, new ProbeClient, std::getenv("OBS_PROBE_URL"),
 								 CefBrowserSettings{}, nullptr, nullptr);
-		if (!browser)
+		if (!browser) {
 			CefQuitMessageLoop();
+		}
 	}
 };
 
@@ -64,15 +67,17 @@ int main(int argc, char **argv)
 
 	CefMainArgs args(argc, argv);
 	int child = CefExecuteProcess(args, app, nullptr);
-	if (child >= 0)
+	if (child >= 0) {
 		return child;
+	}
 	CefSettings settings;
 	settings.no_sandbox = true;
 	settings.windowless_rendering_enabled = true;
 	CefString(&settings.cache_path) = std::getenv("OBS_PROBE_PROFILE");
 	CefString(&settings.root_cache_path) = std::getenv("OBS_PROBE_PROFILE");
-	if (!CefInitialize(args, settings, app, nullptr))
+	if (!CefInitialize(args, settings, app, nullptr)) {
 		return 1;
+	}
 	CefRunMessageLoop();
 	std::cerr << "Probe shutting down CEF" << std::endl;
 	CefShutdown();

@@ -139,7 +139,7 @@ static void ConfigureExtensions(CefRefPtr<CefCommandLine> command_line)
 			return;
 		}
 		LOG(WARNING) << "Ignoring --obs-browser-extension: expected an absolute unpacked extension "
-			        "directory with manifest.json and no commas in the path.";
+				"directory with manifest.json and no commas in the path.";
 	}
 #endif
 	command_line->AppendSwitch("disable-extensions");
@@ -188,8 +188,9 @@ void BrowserApp::OnBeforeCommandLineProcessing(const CefString &process_type, Ce
 	}
 
 	command_line->AppendSwitchWithValue("autoplay-policy", "no-user-gesture-required");
-	if (process_type.empty())
+	if (process_type.empty()) {
 		ConfigureExtensions(command_line);
+	}
 	command_line->AppendSwitchWithValue("disable-features", disableFeatures);
 	command_line->AppendSwitch("hide-crash-restore-bubble");
 #ifdef __APPLE__

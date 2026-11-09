@@ -74,7 +74,8 @@ def check_osr(exe, extension, profile):
                 failures.append(f"{name}: CEF exit {run.returncode}\n{run.stdout}")
                 continue
             print(f"{name}: {match[0]}", flush=True)
-            if (enabled and match[3] != "yes") or (not enabled and match.groups() != ("no", "no", "no")):
+            expected = ("yes", "yes", "yes") if enabled else ("no", "no", "no")
+            if match.groups() != expected:
                 failures.append(f"Unexpected result in {name}: {match[0]}")
         server.shutdown()
     if failures:

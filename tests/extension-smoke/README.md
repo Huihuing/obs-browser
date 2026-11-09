@@ -13,7 +13,7 @@ Close OBS and restart without that option to disable the extension. The `--disab
 
 1. From this repository, run `python -m http.server 8021 --bind 127.0.0.1 --directory tests/extension-smoke/site`.
 2. Launch OBS with the full path to `tests/extension-smoke/extension` and create a Browser Source for `http://127.0.0.1:8021/extension-smoke.html`.
-3. The page reports content script execution, a reply from the MV3 service worker and a blocked network request independently. A working network rule displays **Network rule: yes**. Repeat after restarting without the option. All three indicators should read **no**. The fixture only targets loopback.
+3. The page reports content script execution, a reply from the MV3 service worker and a blocked network request independently. With the fixture loaded, all three indicators should read **yes**. Repeat after restarting without the option. All three indicators should read **no**. The fixture only targets loopback.
 
 ## Linux CEF integration test
 
@@ -23,4 +23,4 @@ With the Linux x86_64 CEF archive pinned in OBS Studio's CMakePresets.json extra
 xvfb-run -a python3 tests/extension-smoke/run-linux.py "$CEF_ROOT_DIR"
 ```
 
-The harness compiles the actual BrowserApp, opens a windowless CEF browser using its global request context, and checks the same temporary profile across four launches. The test requires the network rule to block the probe only while explicitly selected. It reports content-script and worker results separately because Alloy support varies by capability. Use `--policy-only` to run the command-line cases without a graphical session.
+The harness compiles the actual BrowserApp, opens a windowless CEF browser using its global request context, and checks the same temporary profile across four launches. The enabled launch must inject the content script, receive the service worker reply, and block the matching network request. The default, explicit-disable, and subsequent unselected launches must report all three inactive. Use `--policy-only` to run the command-line cases without a graphical session.
