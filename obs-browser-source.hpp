@@ -52,6 +52,9 @@ struct BrowserSource {
 
 	std::string url;
 	std::string css;
+	std::string javascript;
+	std::mutex approvalMutex;
+	std::string pendingApproval;
 	gs_texture_t *texture = nullptr;
 	gs_texture_t *extra_texture = nullptr;
 	uint32_t last_cx = 0;
@@ -113,6 +116,7 @@ struct BrowserSource {
 
 	void Destroy();
 
+	std::string GetApprovedJavaScript(obs_data_t *settings);
 	void Update(obs_data_t *settings = nullptr);
 	void Tick();
 	void Render();

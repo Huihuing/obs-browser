@@ -38,6 +38,8 @@ class BrowserClient : public CefClient,
 		      public CefAudioHandler,
 		      public CefLoadHandler {
 
+	const std::string initialUrl;
+	const std::string javascript;
 	bool sharing_available = false;
 	bool reroute_audio = true;
 	ControlLevel webpage_control_level = DEFAULT_CONTROL_LEVEL;
@@ -57,8 +59,11 @@ public:
 	int frames_per_buffer;
 
 	inline BrowserClient(BrowserSource *bs_, bool sharing_avail, bool reroute_audio_,
-			     ControlLevel webpage_control_level_)
-		: sharing_available(sharing_avail),
+			     ControlLevel webpage_control_level_, const std::string &initialUrl_,
+			     const std::string &script)
+		: initialUrl(initialUrl_),
+		  javascript(script),
+		  sharing_available(sharing_avail),
 		  reroute_audio(reroute_audio_),
 		  webpage_control_level(webpage_control_level_),
 		  bs(bs_)

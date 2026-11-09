@@ -6,6 +6,18 @@ Additionally, obs-browser enables Service Integration (linking third party servi
 
 **This plugin is included by default** on official packages on Windows, macOS, the Ubuntu PPA and the official [Flatpak](https://flathub.org/apps/details/com.obsproject.Studio) (most Linux distributions).
 
+## Custom JavaScript in Browser Source properties
+
+In this fork, open a Browser Source’s properties and enter code in **Custom JavaScript**, below **Custom CSS**. Click **Allow this script on this computer**, review the address, page control permission and code, choose **Yes**, then click **OK** in the properties window. OBS stores the approval locally for this source. Editing the script, address, file mode or page control permission requires a new approval. Clearing the field and clicking **OK** stops execution.
+
+The script runs after each successful main-page load, including refreshes. For HTTP and HTTPS sources, the loaded document must have the configured origin. For a local file, it must also match the selected file path.
+
+To check the behavior, open [probe.html](tests/custom-javascript/probe.html) as a local Browser Source. It initially shows `Idle · main 0 · child 0`. Approve and apply the following line. The probe should show `Pass · main 1 · child 0` on both the first load and a refresh. Edit the script without approving the new version and click **OK**. The probe should return to `Idle`.
+
+```js
+document.documentElement.dataset.runs = String(Number(document.documentElement.dataset.runs || 0) + 1)
+```
+
 ## JS Bindings
 
 obs-browser provides a global object that allows access to some OBS-specific functionality from JavaScript. This can be used to create an overlay that adapts dynamically to changes in OBS.
@@ -357,6 +369,10 @@ obs-browser includes integration with obs-websocket's Vendor requests. The vendo
   - See [#340](https://github.com/obsproject/obs-browser/pull/340) for example usage.
 
 There are no available vendor events at this time.
+
+## Local Chrome extensions in this fork
+
+Start OBS with the absolute path to one trusted unpacked extension. See the [Windows launch example, compatibility limits, and local test](tests/extension-smoke/README.md).
 
 ## Building
 

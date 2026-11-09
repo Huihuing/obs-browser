@@ -29,6 +29,17 @@
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <obs-websocket-api.h>
+#include <QApplication>
+#include <QCryptographicHash>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QLabel>
+#include <QPlainTextEdit>
+#include <QPushButton>
+#include <QSettings>
+#include <QThread>
+#include <QUuid>
+#include <QVBoxLayout>
 
 #include "obs-browser-source.hpp"
 #include "browser-scheme.hpp"
@@ -48,11 +59,6 @@
 
 #ifdef ENABLE_WAYLAND
 #include <obs-nix-platform.h>
-#endif
-
-#ifdef ENABLE_BROWSER_QT_LOOP
-#include <QApplication>
-#include <QThread>
 #endif
 
 #if !defined(_WIN32) && !defined(__APPLE__)
@@ -149,7 +155,131 @@ static void browser_source_get_defaults(obs_data_t *settings)
 	obs_data_set_default_bool(settings, "restart_when_active", false);
 	obs_data_set_default_int(settings, "webpage_control_level", (int)DEFAULT_CONTROL_LEVEL);
 	obs_data_set_default_string(settings, "css", default_css);
+	obs_data_set_default_string(settings, "javascript", "");
 	obs_data_set_default_bool(settings, "reroute_audio", false);
+}
+
+namespace {
+constexpr char approvalRequest[] = "_javascript_approval_request";
+
+struct ScriptVersion {
+	bool local;
+	QByteArray target;
+	long long permission;
+	QByteArray code;
+
+	explicit ScriptVersion(obs_data_t *settings)
+		: local(obs_data_get_bool(settings, "is_local_file")),
+		  target(obs_data_get_string(settings, local ? "local_file" : "url")),
+		  permission(obs_data_get_int(settings, "webpage_control_level")),
+		  code(obs_data_get_string(settings, "javascript"))
+	{
+	}
+
+	QByteArray digest() const
+	{
+		// All input strings are NUL-terminated, so the field boundaries are unambiguous.
+		const auto identity = QByteArray(local ? "file" : "url") + '\0' + target + '\0' +
+				      QByteArray::number(permission) + '\0' + code;
+		return QCryptographicHash::hash(identity, QCryptographicHash::Sha256).toHex();
+	}
+};
+} // namespace
+
+std::string BrowserSource::GetApprovedJavaScript(obs_data_t *settings)
+{
+	const auto request = QByteArray(obs_data_get_string(settings, approvalRequest));
+	obs_data_unset_user_value(settings, approvalRequest);
+	std::string pending;
+	{
+		std::lock_guard lock(approvalMutex);
+		pending.swap(pendingApproval);
+	}
+
+	const ScriptVersion version(settings);
+	const char *uuid = obs_source_get_uuid(source);
+	if (version.code.isEmpty() || version.target.isEmpty() || !uuid || !*uuid) {
+		return {};
+	}
+
+	BPtr<char> configPath = obs_module_config_path("javascript-approvals.ini");
+	if (!configPath) {
+		return {};
+	}
+	QSettings approvals(QString::fromUtf8(configPath.Get()), QSettings::IniFormat);
+	// Scene-provided identifiers never become paths or INI keys.
+	const auto key =
+		QString::fromLatin1(QCryptographicHash::hash(QByteArray(uuid), QCryptographicHash::Sha256).toHex());
+	const auto digest = version.digest();
+	if (!request.isEmpty() && pending == (request + digest).toStdString()) {
+		approvals.setValue(key, digest);
+		approvals.sync();
+		if (approvals.status() != QSettings::NoError) {
+			blog(LOG_WARNING, "[obs-browser] Could not save custom JavaScript approval");
+			return {};
+		}
+	}
+	return approvals.status() == QSettings::NoError && approvals.value(key).toByteArray() == digest
+		       ? version.code.toStdString()
+		       : std::string{};
+}
+
+static bool approve_javascript(obs_properties_t *props, obs_property_t *, void *data)
+{
+	auto *bs = static_cast<BrowserSource *>(data);
+	if (!bs || !qApp || QThread::currentThread() != qApp->thread()) {
+		return false;
+	}
+
+	OBSSourceAutoRelease source = obs_source_get_ref(bs->source);
+	if (!source) {
+		return false;
+	}
+	OBSDataAutoRelease settings = obs_source_get_settings(source);
+	const ScriptVersion version(settings);
+	if (version.code.trimmed().isEmpty() || version.target.isEmpty()) {
+		return false;
+	}
+
+	QString permission = QString::number(version.permission);
+	auto *levels = obs_properties_get(props, "webpage_control_level");
+	for (size_t i = 0; i < obs_property_list_item_count(levels); ++i) {
+		if (obs_property_list_item_int(levels, i) == version.permission) {
+			permission = QString::fromUtf8(obs_property_list_item_name(levels, i));
+			break;
+		}
+	}
+
+	// Property buttons are also callable via obs-websocket. Only a local dialog can authorize code.
+	QDialog review(QApplication::activeWindow());
+	review.setWindowTitle(QString::fromUtf8(obs_module_text("ApproveJavaScript")));
+	QVBoxLayout layout(&review);
+	QLabel scope;
+	scope.setTextFormat(Qt::PlainText);
+	scope.setWordWrap(true);
+	scope.setText(QString::fromUtf8(obs_module_text("JavaScriptScope"))
+			      .arg(QString::fromUtf8(version.target), permission));
+	layout.addWidget(&scope);
+	QPlainTextEdit code;
+	code.setReadOnly(true);
+	code.setPlainText(QString::fromUtf8(version.code));
+	layout.addWidget(&code);
+	QDialogButtonBox buttons(QDialogButtonBox::Yes | QDialogButtonBox::Cancel, &review);
+	QObject::connect(&buttons, &QDialogButtonBox::accepted, &review, &QDialog::accept);
+	QObject::connect(&buttons, &QDialogButtonBox::rejected, &review, &QDialog::reject);
+	layout.addWidget(&buttons);
+	buttons.button(QDialogButtonBox::Yes)->setAutoDefault(false);
+	buttons.button(QDialogButtonBox::Cancel)->setDefault(true);
+	buttons.button(QDialogButtonBox::Cancel)->setFocus();
+	review.resize(640, 440);
+	if (review.exec() == QDialog::Accepted) {
+		const auto request = QUuid::createUuid().toByteArray(QUuid::WithoutBraces);
+		std::lock_guard lock(bs->approvalMutex);
+		bs->pendingApproval = (request + version.digest()).toStdString();
+		// OBS restores the prior settings on Cancel. Only applying this exact draft consumes the request.
+		obs_data_set_string(settings, approvalRequest, request.constData());
+	}
+	return false;
 }
 
 static bool is_local_file_modified(obs_properties_t *props, obs_property_t *, obs_data_t *settings)
@@ -212,6 +342,11 @@ static obs_properties_t *browser_source_get_properties(void *data)
 
 	obs_property_t *p = obs_properties_add_text(props, "css", obs_module_text("CSS"), OBS_TEXT_MULTILINE);
 	obs_property_text_set_monospace(p, true);
+	p = obs_properties_add_text(props, "javascript", obs_module_text("CustomJavaScript"), OBS_TEXT_MULTILINE);
+	obs_property_text_set_monospace(p, true);
+	obs_property_set_long_description(p, obs_module_text("CustomJavaScript.Description"));
+	obs_properties_add_button2(props, "approve_javascript", obs_module_text("ApproveJavaScript"),
+				   approve_javascript, bs);
 	obs_properties_add_bool(props, "shutdown", obs_module_text("ShutdownSourceNotVisible"));
 	obs_properties_add_bool(props, "restart_when_active", obs_module_text("RefreshBrowserActive"));
 

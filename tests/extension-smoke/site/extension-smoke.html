@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>OBS browser extension probe</title>
+<style>body { font: 28px sans-serif; color: white; background: #162536; padding: 1em; }</style>
+<h1>OBS browser extension probe</h1>
+<p id="result">Checking the local test page…</p>
+<script>
+async function check() {
+  const options = {cache: "no-store"};
+  const control = await fetch("?network=control", options);
+  if (!control.ok) throw new Error("Control request failed");
+  let blocked = false;
+  try {
+    await fetch("?network=block", options);
+  } catch {
+    blocked = true;
+  }
+
+  const deadline = performance.now() + 3000;
+  while (!document.documentElement.dataset.obsProbeWorker && performance.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  const {obsProbeContent, obsProbeWorker} = document.documentElement.dataset;
+  const result = `Content script: ${obsProbeContent || "no"} | Worker: ${obsProbeWorker || "no"} | Network rule: ${blocked ? "yes" : "no"}`;
+  document.getElementById("result").textContent = document.title = result;
+}
+check().catch((error) => {
+  document.getElementById("result").textContent = document.title = error.message;
+});
+</script>
+</html>

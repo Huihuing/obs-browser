@@ -19,6 +19,7 @@
 #include "browser-app.hpp"
 #include "browser-version.h"
 #include <nlohmann/json.hpp>
+#include <filesystem>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -120,7 +121,31 @@ void BrowserApp::OnBeforeChildProcessLaunch(CefRefPtr<CefCommandLine> command_li
 #endif
 }
 
-void BrowserApp::OnBeforeCommandLineProcessing(const CefString &, CefRefPtr<CefCommandLine> command_line)
+static void ConfigureExtensions(CefRefPtr<CefCommandLine> command_line)
+{
+#if CHROME_VERSION_MAJOR >= 150
+	command_line->RemoveSwitch("load-extension");
+	command_line->RemoveSwitch("disable-extensions-except");
+	// A scene cannot opt an operator into loading code across the browser profile.
+	const CefString directory = command_line->GetSwitchValue("obs-browser-extension");
+	if (!directory.empty() && !command_line->HasSwitch("disable-extensions")) {
+		const std::string utf8 = directory.ToString();
+		const std::filesystem::path path{reinterpret_cast<const char8_t *>(utf8.c_str())};
+		std::error_code ec;
+		if (path.is_absolute() && utf8.find(',') == std::string::npos &&
+		    std::filesystem::is_regular_file(path / "manifest.json", ec)) {
+			// Chromium loads this directory even when the profile disables other extensions.
+			command_line->AppendSwitchWithValue("disable-extensions-except", directory);
+			return;
+		}
+		LOG(WARNING) << "Ignoring --obs-browser-extension: expected an absolute unpacked extension "
+			        "directory with manifest.json and no commas in the path.";
+	}
+#endif
+	command_line->AppendSwitch("disable-extensions");
+}
+
+void BrowserApp::OnBeforeCommandLineProcessing(const CefString &process_type, CefRefPtr<CefCommandLine> command_line)
 {
 	if (!shared_texture_available) {
 		bool enableGPU = command_line->HasSwitch("enable-gpu");
@@ -163,7 +188,8 @@ void BrowserApp::OnBeforeCommandLineProcessing(const CefString &, CefRefPtr<CefC
 	}
 
 	command_line->AppendSwitchWithValue("autoplay-policy", "no-user-gesture-required");
-	command_line->AppendSwitch("disable-extensions");
+	if (process_type.empty())
+		ConfigureExtensions(command_line);
 	command_line->AppendSwitchWithValue("disable-features", disableFeatures);
 	command_line->AppendSwitch("hide-crash-restore-bubble");
 #ifdef __APPLE__
