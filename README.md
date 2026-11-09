@@ -372,7 +372,7 @@ There are no available vendor events at this time.
 
 ## Local Chrome extensions in this fork
 
-Start OBS with the absolute path to one trusted unpacked extension. See the [Windows launch example, compatibility limits, and local test](tests/extension-smoke/README.md).
+Select a trusted unpacked extension under **Tools → Browser Extension…**, then restart OBS. See the [launch options, compatibility details, and local test](tests/extension-smoke/README.md).
 
 ## Building
 

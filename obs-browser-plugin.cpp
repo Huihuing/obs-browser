@@ -33,7 +33,9 @@
 #include <QCryptographicHash>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QFileDialog>
 #include <QLabel>
+#include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSettings>
@@ -417,6 +419,62 @@ static obs_missing_files_t *browser_source_missingfiles(void *data)
 }
 
 static CefRefPtr<BrowserApp> app;
+static std::string startupExtensionDirectory;
+
+#if CHROME_VERSION_MAJOR >= 150
+static void manage_browser_extension(void *)
+{
+	BPtr<char> path = obs_module_config_path("extensions.ini");
+	auto *window = static_cast<QWidget *>(obs_frontend_get_main_window());
+	const auto tr = [](const char *key) {
+		return QString::fromUtf8(obs_module_text(key));
+	};
+	const auto title = tr("BrowserExtension");
+	if (!path) {
+		QMessageBox::warning(window, title, tr("BrowserExtensionSettingsError"));
+		return;
+	}
+	QSettings settings(QString::fromUtf8(path.Get()), QSettings::IniFormat);
+	const auto saved = settings.value("directory").toString();
+	if (settings.status() != QSettings::NoError) {
+		QMessageBox::warning(window, title, tr("BrowserExtensionSettingsError"));
+		return;
+	}
+
+	QMessageBox menu(window);
+	menu.setWindowTitle(title);
+	menu.setTextFormat(Qt::PlainText);
+	menu.setText(tr("BrowserExtensionScope").arg(saved.isEmpty() ? tr("BrowserExtensionOff") : saved));
+	auto *choose = menu.addButton(tr("BrowserExtensionChoose"), QMessageBox::ActionRole);
+	auto *disable = menu.addButton(tr("BrowserExtensionDisable"), QMessageBox::DestructiveRole);
+	disable->setEnabled(!saved.isEmpty());
+	menu.setDefaultButton(menu.addButton(QMessageBox::Cancel));
+	menu.exec();
+
+	if (menu.clickedButton() == choose) {
+		const auto directory = QFileDialog::getExistingDirectory(window, tr("BrowserExtensionChoose"), saved);
+		if (directory.isEmpty()) {
+			return;
+		}
+		if (!BrowserApp::IsValidExtensionDirectory(directory.toStdString())) {
+			QMessageBox::warning(window, title, tr("BrowserExtensionInvalid"));
+			return;
+		}
+		settings.setValue("directory", directory);
+	} else if (menu.clickedButton() == disable) {
+		settings.remove("directory");
+	} else {
+		return;
+	}
+
+	settings.sync();
+	if (settings.status() != QSettings::NoError) {
+		QMessageBox::warning(window, title, tr("BrowserExtensionSettingsError"));
+	} else {
+		QMessageBox::information(window, title, tr("BrowserExtensionRestart"));
+	}
+}
+#endif
 
 static void BrowserInit(void)
 {
@@ -523,6 +581,7 @@ static void BrowserInit(void)
 	app = new BrowserApp(tex_sharing_avail, obs_get_nix_platform() == OBS_NIX_PLATFORM_WAYLAND);
 #endif
 
+	app->SetStartupExtension(startupExtensionDirectory);
 #ifdef _WIN32
 	CefExecuteProcess(args, app, nullptr);
 #endif
@@ -1021,6 +1080,19 @@ bool obs_module_load(void)
 	blog(LOG_INFO, "[obs-browser]: CEF Version %i.%i.%i.%i (runtime), %s (compiled)", cef_version_info(4),
 	     cef_version_info(5), cef_version_info(6), cef_version_info(7), CEF_VERSION);
 
+#if CHROME_VERSION_MAJOR >= 150
+	// Snapshot before registering the menu. A lazy CEF start should use the selection from launch.
+	startupExtensionDirectory.clear();
+	BPtr<char> extensionConfig = obs_module_config_path("extensions.ini");
+	if (extensionConfig) {
+		QSettings settings(QString::fromUtf8(extensionConfig.Get()), QSettings::IniFormat);
+		auto directory = settings.value("directory").toString().toStdString();
+		if (settings.status() == QSettings::NoError) {
+			startupExtensionDirectory = std::move(directory);
+		}
+	}
+	obs_frontend_add_tools_menu_item(obs_module_text("BrowserExtension"), manage_browser_extension, nullptr);
+#endif
 	RegisterBrowserSource();
 	obs_frontend_add_event_callback(handle_obs_frontend_event, nullptr);
 

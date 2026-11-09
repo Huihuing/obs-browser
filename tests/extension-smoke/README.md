@@ -1,19 +1,21 @@
 # Unpacked extensions in Browser Source
 
-The fork supports an experimental startup option with its pinned Chromium 150 CEF. Fully exit OBS, then launch the modified build with an absolute path to a trusted unpacked extension folder containing `manifest.json`. The path can include spaces or Korean characters. Commas separate directories in Chromium and are rejected here. A scene cannot turn the option on. One selected extension can act on any matching URL in the OBS browser profile.
+Open **Tools → Browser Extension…** in the modified build, choose the folder of one trusted unpacked extension containing `manifest.json`, then restart OBS. To turn it off, reopen the menu, select **Disable extension**, and restart. The setting is local to this OBS configuration. The extension can access matching pages across Browser Sources and Browser Docks according to its permissions.
+
+The command line can override the saved folder for one launch. For example, on Windows:
 
 ```powershell
 cd "C:\Program Files\obs-studio\bin\64bit"
 .\obs64.exe "--obs-browser-extension=C:\OBS Extensions\local-probe"
 ```
 
-Close OBS and restart without that option to disable the extension. The `--disable-extensions` switch takes precedence. Browser Source uses off-screen rendering. The Chrome Web Store, CRX installer, toolbar, and popup UI are outside this loader's scope. Test the APIs your extension uses with this build.
+Without a launch override, OBS uses the folder saved in the menu. `--disable-extensions` always wins. A missing or invalid override disables extensions for that launch. Folder paths may contain spaces and Korean characters. Commas are reserved by Chromium. Browser Source uses off-screen rendering. The Chrome Web Store, CRX installer, toolbar, and popup UI are outside this loader's scope. Test the APIs your extension uses with this build.
 
 ## Local check
 
 1. From this repository, run `python -m http.server 8021 --bind 127.0.0.1 --directory tests/extension-smoke/site`.
 2. Launch OBS with the full path to `tests/extension-smoke/extension` and create a Browser Source for `http://127.0.0.1:8021/extension-smoke.html`.
-3. The page reports content script execution, a reply from the MV3 service worker and a blocked network request independently. With the fixture loaded, all three indicators should read **yes**. Repeat after restarting without the option. All three indicators should read **no**. The fixture only targets loopback.
+3. The page reports content script execution, a reply from the MV3 service worker and a blocked network request independently. With the fixture loaded, all three indicators should read **yes**. Repeat after clearing the saved folder and restarting without the option. All three indicators should read **no**. The fixture only targets loopback.
 
 ## Linux CEF integration test
 
@@ -23,4 +25,4 @@ With the Linux x86_64 CEF archive pinned in OBS Studio's CMakePresets.json extra
 xvfb-run -a python3 tests/extension-smoke/run-linux.py "$CEF_ROOT_DIR"
 ```
 
-The harness compiles the actual BrowserApp, opens a windowless CEF browser using its global request context, and checks the same temporary profile across four launches. The enabled launch must inject the content script, receive the service worker reply, and block the matching network request. The default, explicit-disable, and subsequent unselected launches must report all three inactive. Use `--policy-only` to run the command-line cases without a graphical session.
+The harness compiles the actual BrowserApp, opens a windowless CEF browser using its global request context, and checks the same temporary profile across five launches. Both the menu-configured and CLI-selected launches must inject the content script, receive the service worker reply, and block the matching network request. The default, explicit-disable, and subsequent unselected launches must report all three inactive. Use `--policy-only` to run the command-line cases without a graphical session.

@@ -34,17 +34,26 @@ def build(cef, destination):
 
 def check_policy(exe, extension):
     option = f"--obs-browser-extension={extension}"
+    other = extension.parent / "other extension"
+    shutil.copytree(extension, other)
     cases = [
-        ("default", [], ""),
-        ("local directory", [option], str(extension)),
-        ("missing manifest", [f"--obs-browser-extension={extension.parent}"], ""),
-        ("relative directory", ["--obs-browser-extension=relative/path"], ""),
-        ("explicit disable", [option, "--disable-extensions"], ""),
-        ("raw loader", [f"--load-extension={extension}"], ""),
-        ("raw exception", [f"--disable-extensions-except={extension}"], ""),
+        ("default", [], "", ""),
+        ("CLI directory", [option], "", str(extension)),
+        ("missing manifest", [f"--obs-browser-extension={extension.parent}"], "", ""),
+        ("relative directory", ["--obs-browser-extension=relative/path"], "", ""),
+        ("explicit disable", [option, "--disable-extensions"], "", ""),
+        ("raw loader", [f"--load-extension={extension}"], "", ""),
+        ("raw exception", [f"--disable-extensions-except={extension}"], "", ""),
+        ("saved directory", [], str(other), str(other)),
+        ("missing saved directory", [], str(other / "missing"), ""),
+        ("CLI overrides saved", [option], str(other), str(extension)),
+        ("invalid CLI overrides saved", ["--obs-browser-extension=invalid"], str(other), ""),
+        ("empty CLI overrides saved", ["--obs-browser-extension="], str(other), ""),
+        ("explicit disable overrides saved", ["--disable-extensions"], str(other), ""),
     ]
-    for name, flags, allowed in cases:
-        result = subprocess.check_output([exe, "--check-policy", *flags], text=True).strip()
+    for name, flags, saved, allowed in cases:
+        env = dict(os.environ, OBS_PROBE_SAVED_EXTENSION=saved)
+        result = subprocess.check_output([exe, "--check-policy", *flags], env=env, text=True).strip()
         expected = f"disabled={int(not allowed)} allow={allowed} load="
         if result != expected:
             raise RuntimeError(f"{name}: expected {expected!r}, got {result!r}")
@@ -59,13 +68,15 @@ def check_osr(exe, extension, profile):
         url = f"http://127.0.0.1:{server.server_port}/extension-smoke.html"
         env = dict(os.environ, OBS_PROBE_URL=url, OBS_PROBE_PROFILE=str(profile))
         option = f"--obs-browser-extension={extension}"
-        for name, args, enabled in [
-            ("default", [], False), ("enabled", [option], True),
-            ("explicit disable", [option, "--disable-extensions"], False),
-            ("restart without selection", [], False),
+        for name, args, saved, enabled in [
+            ("default", [], "", False), ("enabled", [option], "", True),
+            ("explicit disable", [option, "--disable-extensions"], "", False),
+            ("saved selection", [], str(extension), True),
+            ("restart without selection", [], "", False),
         ]:
             run = subprocess.run(
-                [exe, "--disable-gpu", *args], env=env, text=True, stdout=subprocess.PIPE,
+                [exe, "--disable-gpu", *args], env=dict(env, OBS_PROBE_SAVED_EXTENSION=saved),
+                text=True, stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT, timeout=45,
             )
             match = re.search(r"^Content script: (yes|no) \| Worker: (yes|no) \| Network rule: (yes|no)$",

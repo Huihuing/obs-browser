@@ -55,6 +55,9 @@ public:
 int main(int argc, char **argv)
 {
 	CefRefPtr<ProbeApp> app = new ProbeApp;
+	if (const char *saved = std::getenv("OBS_PROBE_SAVED_EXTENSION")) {
+		app->SetStartupExtension(saved);
+	}
 	if (argc > 1 && std::string_view(argv[1]) == "--check-policy") {
 		auto line = CefCommandLine::CreateCommandLine();
 		line->InitFromArgv(argc, argv);

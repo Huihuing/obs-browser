@@ -66,6 +66,7 @@ class BrowserApp : public CefApp, public CefRenderProcessHandler, public CefBrow
 
 	typedef std::map<int, CefRefPtr<CefV8Value>> CallbackMap;
 
+	std::string savedExtensionDirectory;
 	bool shared_texture_available;
 	CallbackMap callbackMap;
 	int callbackId;
@@ -83,6 +84,9 @@ public:
 #endif
 	{
 	}
+
+	static bool IsValidExtensionDirectory(const std::string &directory);
+	void SetStartupExtension(const std::string &directory) { savedExtensionDirectory = directory; }
 
 	virtual CefRefPtr<CefRenderProcessHandler> GetRenderProcessHandler() override;
 	virtual CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override;

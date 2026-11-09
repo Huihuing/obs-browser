@@ -121,26 +121,35 @@ void BrowserApp::OnBeforeChildProcessLaunch(CefRefPtr<CefCommandLine> command_li
 #endif
 }
 
-static void ConfigureExtensions(CefRefPtr<CefCommandLine> command_line)
+bool BrowserApp::IsValidExtensionDirectory(const std::string &directory)
+{
+	const std::filesystem::path path{reinterpret_cast<const char8_t *>(directory.c_str())};
+	std::error_code ec;
+	return path.is_absolute() && directory.find(',') == std::string::npos &&
+	       directory.find('\0') == std::string::npos &&
+	       std::filesystem::is_regular_file(path / "manifest.json", ec);
+}
+
+static void ConfigureExtensions(CefRefPtr<CefCommandLine> command_line, const std::string &savedDirectory)
 {
 #if CHROME_VERSION_MAJOR >= 150
 	command_line->RemoveSwitch("load-extension");
 	command_line->RemoveSwitch("disable-extensions-except");
 	// A scene cannot opt an operator into loading code across the browser profile.
-	const CefString directory = command_line->GetSwitchValue("obs-browser-extension");
+	const auto directory = command_line->HasSwitch("obs-browser-extension")
+				       ? command_line->GetSwitchValue("obs-browser-extension").ToString()
+				       : savedDirectory;
 	if (!directory.empty() && !command_line->HasSwitch("disable-extensions")) {
-		const std::string utf8 = directory.ToString();
-		const std::filesystem::path path{reinterpret_cast<const char8_t *>(utf8.c_str())};
-		std::error_code ec;
-		if (path.is_absolute() && utf8.find(',') == std::string::npos &&
-		    std::filesystem::is_regular_file(path / "manifest.json", ec)) {
+		if (BrowserApp::IsValidExtensionDirectory(directory)) {
 			// Chromium loads this directory even when the profile disables other extensions.
 			command_line->AppendSwitchWithValue("disable-extensions-except", directory);
 			return;
 		}
-		LOG(WARNING) << "Ignoring --obs-browser-extension: expected an absolute unpacked extension "
+		LOG(WARNING) << "Ignoring browser extension: expected an absolute unpacked extension "
 				"directory with manifest.json and no commas in the path.";
 	}
+#else
+	(void)savedDirectory;
 #endif
 	command_line->AppendSwitch("disable-extensions");
 }
@@ -189,7 +198,7 @@ void BrowserApp::OnBeforeCommandLineProcessing(const CefString &process_type, Ce
 
 	command_line->AppendSwitchWithValue("autoplay-policy", "no-user-gesture-required");
 	if (process_type.empty()) {
-		ConfigureExtensions(command_line);
+		ConfigureExtensions(command_line, savedExtensionDirectory);
 	}
 	command_line->AppendSwitchWithValue("disable-features", disableFeatures);
 	command_line->AppendSwitch("hide-crash-restore-bubble");
