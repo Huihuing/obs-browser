@@ -3,6 +3,7 @@
 import argparse
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+import json
 import os
 from pathlib import Path
 import re
@@ -32,60 +33,65 @@ def build(cef, destination):
     return exe
 
 
-def check_policy(exe, extension):
-    option = f"--obs-browser-extension={extension}"
-    other = extension.parent / "other extension"
-    shutil.copytree(extension, other)
+def check_policy(exe, first, second):
+    option = f"--obs-browser-extension={first}"
+    missing = str(Path(second) / "missing")
     cases = [
-        ("default", [], "", ""),
-        ("CLI directory", [option], "", str(extension)),
-        ("missing manifest", [f"--obs-browser-extension={extension.parent}"], "", ""),
-        ("relative directory", ["--obs-browser-extension=relative/path"], "", ""),
-        ("explicit disable", [option, "--disable-extensions"], "", ""),
-        ("raw loader", [f"--load-extension={extension}"], "", ""),
-        ("raw exception", [f"--disable-extensions-except={extension}"], "", ""),
-        ("saved directory", [], str(other), str(other)),
-        ("missing saved directory", [], str(other / "missing"), ""),
-        ("CLI overrides saved", [option], str(other), str(extension)),
-        ("invalid CLI overrides saved", ["--obs-browser-extension=invalid"], str(other), ""),
-        ("empty CLI overrides saved", ["--obs-browser-extension="], str(other), ""),
-        ("explicit disable overrides saved", ["--disable-extensions"], str(other), ""),
+        ("default", [], [], []),
+        ("CLI directory", [option], [], [first]),
+        ("missing manifest", [f"--obs-browser-extension={Path(first).parent}"], [], []),
+        ("relative directory", ["--obs-browser-extension=relative/path"], [], []),
+        ("explicit disable", [option, "--disable-extensions"], [], []),
+        ("raw loader", [f"--load-extension={first}"], [], []),
+        ("raw exception", [f"--disable-extensions-except={first}"], [], []),
+        ("two checked directories", [], [first, second], [first, second]),
+        ("order and duplicates", [], [second, first, second], [second, first]),
+        ("missing checked directory", [], [missing, first], [first]),
+        ("no valid checked directory", [], [missing], []),
+        ("CLI overrides checklist", [option], [second], [first]),
+        ("invalid CLI overrides checklist", ["--obs-browser-extension=invalid"], [first, second], []),
+        ("empty CLI overrides checklist", ["--obs-browser-extension="], [second], []),
+        ("explicit disable overrides checklist", ["--disable-extensions"], [first, second], []),
+        ("manual comma-separated override rejected", [f"{option},{second}"], [first], []),
     ]
     for name, flags, saved, allowed in cases:
-        env = dict(os.environ, OBS_PROBE_SAVED_EXTENSION=saved)
+        env = dict(os.environ, OBS_PROBE_SAVED_EXTENSIONS=json.dumps(saved))
         result = subprocess.check_output([exe, "--check-policy", *flags], env=env, text=True).strip()
-        expected = f"disabled={int(not allowed)} allow={allowed} load="
+        expected = f"disabled={int(not allowed)} allow={','.join(allowed)} load="
         if result != expected:
             raise RuntimeError(f"{name}: expected {expected!r}, got {result!r}")
         print(f"Policy passed: {name}", flush=True)
 
 
-def check_osr(exe, extension, profile):
+def check_osr(exe, first, second, profile):
     failures = []
     handler = partial(SimpleHTTPRequestHandler, directory=str(FIXTURE / "site"))
     with ThreadingHTTPServer(("127.0.0.1", 0), handler) as server:
         Thread(target=server.serve_forever, daemon=True).start()
         url = f"http://127.0.0.1:{server.server_port}/extension-smoke.html"
         env = dict(os.environ, OBS_PROBE_URL=url, OBS_PROBE_PROFILE=str(profile))
-        option = f"--obs-browser-extension={extension}"
-        for name, args, saved, enabled in [
-            ("default", [], "", False), ("enabled", [option], "", True),
-            ("explicit disable", [option, "--disable-extensions"], "", False),
-            ("saved selection", [], str(extension), True),
-            ("restart without selection", [], "", False),
+        option = f"--obs-browser-extension={first}"
+        for name, args, saved, expect_first, expect_second in [
+            ("fresh profile", [], [], False, False),
+            ("both checked", [], [first, second], True, True),
+            ("only first checked", [], [first], True, False),
+            ("only second checked", [], [second], False, True),
+            ("no boxes checked", [], [], False, False),
+            ("CLI overrides checklist", [option], [second], True, False),
+            ("explicit disable", ["--disable-extensions"], [first, second], False, False),
         ]:
             run = subprocess.run(
-                [exe, "--disable-gpu", *args], env=dict(env, OBS_PROBE_SAVED_EXTENSION=saved),
+                [exe, "--disable-gpu", *args], env=dict(env, OBS_PROBE_SAVED_EXTENSIONS=json.dumps(saved)),
                 text=True, stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT, timeout=45,
             )
-            match = re.search(r"^Content script: (yes|no) \| Worker: (yes|no) \| Network rule: (yes|no)$",
+            match = re.search(r"^Content script: (yes|no) \| Worker: (yes|no) \| Network rule: (yes|no) \| Second: (yes|no)$",
                               run.stdout, re.MULTILINE)
             if not match or run.returncode:
                 failures.append(f"{name}: CEF exit {run.returncode}\n{run.stdout}")
                 continue
             print(f"{name}: {match[0]}", flush=True)
-            expected = ("yes", "yes", "yes") if enabled else ("no", "no", "no")
+            expected = ("yes" if expect_first else "no",) * 3 + ("yes" if expect_second else "no",)
             if match.groups() != expected:
                 failures.append(f"Unexpected result in {name}: {match[0]}")
         server.shutdown()
@@ -100,9 +106,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
     with tempfile.TemporaryDirectory() as temp:
         destination = Path(temp)
-        extension = destination / "선택한 extension"
-        shutil.copytree(FIXTURE / "extension", extension)
+        first = shutil.copytree(FIXTURE / "extension", destination / "첫 번째 확장").as_posix()
+        second = shutil.copytree(FIXTURE / "extension-b", destination / "두 번째 확장").as_posix()
         executable = build(args.cef_root.resolve(), destination)
-        check_policy(executable, extension)
+        check_policy(executable, first, second)
         if not args.policy_only:
-            check_osr(executable, extension, destination / "profile")
+            check_osr(executable, first, second, destination / "profile")

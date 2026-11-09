@@ -20,6 +20,7 @@
 #include "browser-version.h"
 #include <nlohmann/json.hpp>
 #include <filesystem>
+#include <unordered_set>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -130,26 +131,38 @@ bool BrowserApp::IsValidExtensionDirectory(const std::string &directory)
 	       std::filesystem::is_regular_file(path / "manifest.json", ec);
 }
 
-static void ConfigureExtensions(CefRefPtr<CefCommandLine> command_line, const std::string &savedDirectory)
+static void ConfigureExtensions(CefRefPtr<CefCommandLine> command_line, std::vector<std::string> directories)
 {
 #if CHROME_VERSION_MAJOR >= 150
 	command_line->RemoveSwitch("load-extension");
 	command_line->RemoveSwitch("disable-extensions-except");
-	// A scene cannot opt an operator into loading code across the browser profile.
-	const auto directory = command_line->HasSwitch("obs-browser-extension")
-				       ? command_line->GetSwitchValue("obs-browser-extension").ToString()
-				       : savedDirectory;
-	if (!directory.empty() && !command_line->HasSwitch("disable-extensions")) {
-		if (BrowserApp::IsValidExtensionDirectory(directory)) {
-			// Chromium loads this directory even when the profile disables other extensions.
-			command_line->AppendSwitchWithValue("disable-extensions-except", directory);
+	// An explicit launch path replaces the saved checklist, even if that path is invalid.
+	if (command_line->HasSwitch("obs-browser-extension")) {
+		directories = {command_line->GetSwitchValue("obs-browser-extension").ToString()};
+	}
+	if (!command_line->HasSwitch("disable-extensions")) {
+		std::string allowlist;
+		std::unordered_set<std::string> seen;
+		for (const auto &directory : directories) {
+			if (!seen.insert(directory).second) {
+				continue;
+			}
+			if (!BrowserApp::IsValidExtensionDirectory(directory)) {
+				LOG(WARNING) << "Ignoring invalid unpacked extension directory: " << directory;
+				continue;
+			}
+			if (!allowlist.empty()) {
+				allowlist += ',';
+			}
+			allowlist += directory;
+		}
+		if (!allowlist.empty()) {
+			command_line->AppendSwitchWithValue("disable-extensions-except", allowlist);
 			return;
 		}
-		LOG(WARNING) << "Ignoring browser extension: expected an absolute unpacked extension "
-				"directory with manifest.json and no commas in the path.";
 	}
 #else
-	(void)savedDirectory;
+	(void)directories;
 #endif
 	command_line->AppendSwitch("disable-extensions");
 }
@@ -198,7 +211,7 @@ void BrowserApp::OnBeforeCommandLineProcessing(const CefString &process_type, Ce
 
 	command_line->AppendSwitchWithValue("autoplay-policy", "no-user-gesture-required");
 	if (process_type.empty()) {
-		ConfigureExtensions(command_line, savedExtensionDirectory);
+		ConfigureExtensions(command_line, savedExtensionDirectories);
 	}
 	command_line->AppendSwitchWithValue("disable-features", disableFeatures);
 	command_line->AppendSwitch("hide-crash-restore-bubble");

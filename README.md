@@ -8,7 +8,7 @@ Additionally, obs-browser enables Service Integration (linking third party servi
 
 ## Custom JavaScript in Browser Source properties
 
-In this fork, open a Browser Source’s properties and enter code in **Custom JavaScript**, below **Custom CSS**. Click **Allow this script on this computer**, review the address, page control permission and code, choose **Yes**, then click **OK** in the properties window. OBS stores the approval locally for this source. Editing the script, address, file mode or page control permission requires a new approval. Clearing the field and clicking **OK** stops execution.
+In this fork, open a Browser Source’s properties and enter code in **Custom JavaScript**, below **Custom CSS**. Click **Allow JavaScript on this computer**, review the address, page control permission and code, choose **Allow execution**, then click **OK** in the properties window. OBS stores the approval locally for this source. Editing the script, address, file mode or page control permission requires a new approval. Clearing the field and clicking **OK** stops execution.
 
 The script runs after each successful main-page load, including refreshes. For HTTP and HTTPS sources, the loaded document must have the configured origin. For a local file, it must also match the selected file path.
 
@@ -372,7 +372,7 @@ There are no available vendor events at this time.
 
 ## Local Chrome extensions in this fork
 
-Select a trusted unpacked extension under **Tools → Browser Extension…**, then restart OBS. See the [launch options, compatibility details, and local test](tests/extension-smoke/README.md).
+Under **Tools → Browser Extensions…**, add trusted unpacked extensions and check the ones to load. Apply your selection and restart OBS. See the [launch options, compatibility details, and local test](tests/extension-smoke/README.md).
 
 ## Building
 

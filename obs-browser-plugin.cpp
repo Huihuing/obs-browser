@@ -33,13 +33,17 @@
 #include <QCryptographicHash>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QDir>
 #include <QFileDialog>
+#include <QHeaderView>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSettings>
 #include <QThread>
+#include <QTreeWidget>
 #include <QUuid>
 #include <QVBoxLayout>
 
@@ -270,6 +274,7 @@ static bool approve_javascript(obs_properties_t *props, obs_property_t *, void *
 	QObject::connect(&buttons, &QDialogButtonBox::accepted, &review, &QDialog::accept);
 	QObject::connect(&buttons, &QDialogButtonBox::rejected, &review, &QDialog::reject);
 	layout.addWidget(&buttons);
+	buttons.button(QDialogButtonBox::Yes)->setText(QString::fromUtf8(obs_module_text("AllowJavaScriptAction")));
 	buttons.button(QDialogButtonBox::Yes)->setAutoDefault(false);
 	buttons.button(QDialogButtonBox::Cancel)->setDefault(true);
 	buttons.button(QDialogButtonBox::Cancel)->setFocus();
@@ -419,9 +424,38 @@ static obs_missing_files_t *browser_source_missingfiles(void *data)
 }
 
 static CefRefPtr<BrowserApp> app;
-static std::string startupExtensionDirectory;
+static std::vector<std::string> startupExtensionDirectories;
 
 #if CHROME_VERSION_MAJOR >= 150
+struct ExtensionSelection {
+	QStringList directories;
+	QStringList enabled;
+};
+
+static ExtensionSelection read_extensions(QSettings &settings)
+{
+	ExtensionSelection result;
+	if (!settings.contains("directories") && !settings.contains("enabledDirectories")) {
+		const auto legacy = settings.value("directory").toString();
+		if (!legacy.isEmpty()) {
+			result.directories.append(legacy);
+			result.enabled.append(legacy);
+		}
+		return result;
+	}
+
+	result.directories = settings.value("directories").toStringList();
+	result.directories.removeAll(QString());
+	result.directories.removeDuplicates();
+	const auto enabled = settings.value("enabledDirectories").toStringList();
+	for (const auto &directory : result.directories) {
+		if (enabled.contains(directory)) {
+			result.enabled.append(directory);
+		}
+	}
+	return result;
+}
+
 static void manage_browser_extension(void *)
 {
 	BPtr<char> path = obs_module_config_path("extensions.ini");
@@ -435,42 +469,111 @@ static void manage_browser_extension(void *)
 		return;
 	}
 	QSettings settings(QString::fromUtf8(path.Get()), QSettings::IniFormat);
-	const auto saved = settings.value("directory").toString();
+	const auto saved = read_extensions(settings);
 	if (settings.status() != QSettings::NoError) {
 		QMessageBox::warning(window, title, tr("BrowserExtensionSettingsError"));
 		return;
 	}
 
-	QMessageBox menu(window);
-	menu.setWindowTitle(title);
-	menu.setTextFormat(Qt::PlainText);
-	menu.setText(tr("BrowserExtensionScope").arg(saved.isEmpty() ? tr("BrowserExtensionOff") : saved));
-	auto *choose = menu.addButton(tr("BrowserExtensionChoose"), QMessageBox::ActionRole);
-	auto *disable = menu.addButton(tr("BrowserExtensionDisable"), QMessageBox::DestructiveRole);
-	disable->setEnabled(!saved.isEmpty());
-	menu.setDefaultButton(menu.addButton(QMessageBox::Cancel));
-	menu.exec();
+	QDialog dialog(window);
+	dialog.setWindowTitle(title);
+	QVBoxLayout layout(&dialog);
+	QLabel scope(tr("BrowserExtensionScope"));
+	scope.setWordWrap(true);
+	layout.addWidget(&scope);
 
-	if (menu.clickedButton() == choose) {
-		const auto directory = QFileDialog::getExistingDirectory(window, tr("BrowserExtensionChoose"), saved);
+	QTreeWidget folders;
+	folders.setRootIsDecorated(false);
+	folders.setHeaderLabels({tr("BrowserExtensionFolder"), tr("BrowserExtensionPath")});
+	folders.header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+	folders.setSelectionMode(QAbstractItemView::SingleSelection);
+	layout.addWidget(&folders);
+	const auto addRow = [&](const QString &directory, bool checked) {
+		auto *row = new QTreeWidgetItem(&folders, {QFileInfo(directory).fileName(), directory});
+		row->setToolTip(1, directory);
+		row->setFlags(row->flags() | Qt::ItemIsUserCheckable);
+		row->setCheckState(0, checked ? Qt::Checked : Qt::Unchecked);
+	};
+	for (const auto &directory : saved.directories) {
+		addRow(directory, saved.enabled.contains(directory));
+	}
+
+	QHBoxLayout actions;
+	layout.addLayout(&actions);
+	QPushButton choose(tr("BrowserExtensionChoose")), scan(tr("BrowserExtensionScan")),
+		remove(tr("BrowserExtensionRemove"));
+	actions.addWidget(&choose);
+	actions.addWidget(&scan);
+	actions.addStretch();
+	actions.addWidget(&remove);
+	remove.setEnabled(false);
+	QObject::connect(&folders, &QTreeWidget::itemSelectionChanged, &remove,
+			 [&]() { remove.setEnabled(!folders.selectedItems().isEmpty()); });
+	QObject::connect(&remove, &QPushButton::clicked, [&]() { delete folders.currentItem(); });
+
+	const auto pick = [&](bool parent) {
+		const auto directory = QFileDialog::getExistingDirectory(
+			&dialog, tr(parent ? "BrowserExtensionScan" : "BrowserExtensionChoose"));
 		if (directory.isEmpty()) {
 			return;
 		}
-		if (!BrowserApp::IsValidExtensionDirectory(directory.toStdString())) {
-			QMessageBox::warning(window, title, tr("BrowserExtensionInvalid"));
-			return;
+		QFileInfoList candidates;
+		if (parent) {
+			candidates = QDir(directory).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+		} else {
+			candidates.append(QFileInfo(directory));
 		}
-		settings.setValue("directory", directory);
-	} else if (menu.clickedButton() == disable) {
-		settings.remove("directory");
-	} else {
+		bool found = false;
+		for (const auto &candidate : candidates) {
+			const auto canonical = candidate.canonicalFilePath();
+			if (canonical.isEmpty() || !BrowserApp::IsValidExtensionDirectory(canonical.toStdString())) {
+				continue;
+			}
+			found = true;
+			bool registered = false;
+			for (int i = 0; i < folders.topLevelItemCount(); ++i) {
+				if (QFileInfo(folders.topLevelItem(i)->text(1)) == QFileInfo(canonical)) {
+					registered = true;
+					break;
+				}
+			}
+			if (!registered) {
+				addRow(canonical, !parent);
+			}
+		}
+		if (!found) {
+			QMessageBox::warning(&dialog, title,
+					     tr(parent ? "BrowserExtensionNoChildren" : "BrowserExtensionInvalid"));
+		}
+	};
+	QObject::connect(&choose, &QPushButton::clicked, [&]() { pick(false); });
+	QObject::connect(&scan, &QPushButton::clicked, [&]() { pick(true); });
+
+	QDialogButtonBox buttons(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+	layout.addWidget(&buttons);
+	QObject::connect(&buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+	QObject::connect(&buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+	dialog.resize(720, 400);
+	if (dialog.exec() != QDialog::Accepted) {
 		return;
 	}
 
+	ExtensionSelection selected;
+	for (int i = 0; i < folders.topLevelItemCount(); ++i) {
+		const auto *row = folders.topLevelItem(i);
+		const auto directory = row->text(1);
+		selected.directories.append(directory);
+		if (row->checkState(0) == Qt::Checked) {
+			selected.enabled.append(directory);
+		}
+	}
+	settings.setValue("directories", selected.directories);
+	settings.setValue("enabledDirectories", selected.enabled);
+	settings.remove("directory");
 	settings.sync();
 	if (settings.status() != QSettings::NoError) {
 		QMessageBox::warning(window, title, tr("BrowserExtensionSettingsError"));
-	} else {
+	} else if (selected.enabled != saved.enabled) {
 		QMessageBox::information(window, title, tr("BrowserExtensionRestart"));
 	}
 }
@@ -581,7 +684,7 @@ static void BrowserInit(void)
 	app = new BrowserApp(tex_sharing_avail, obs_get_nix_platform() == OBS_NIX_PLATFORM_WAYLAND);
 #endif
 
-	app->SetStartupExtension(startupExtensionDirectory);
+	app->SetStartupExtensions(startupExtensionDirectories);
 #ifdef _WIN32
 	CefExecuteProcess(args, app, nullptr);
 #endif
@@ -1082,13 +1185,15 @@ bool obs_module_load(void)
 
 #if CHROME_VERSION_MAJOR >= 150
 	// Snapshot before registering the menu. A lazy CEF start should use the selection from launch.
-	startupExtensionDirectory.clear();
+	startupExtensionDirectories.clear();
 	BPtr<char> extensionConfig = obs_module_config_path("extensions.ini");
 	if (extensionConfig) {
 		QSettings settings(QString::fromUtf8(extensionConfig.Get()), QSettings::IniFormat);
-		auto directory = settings.value("directory").toString().toStdString();
+		const auto selected = read_extensions(settings);
 		if (settings.status() == QSettings::NoError) {
-			startupExtensionDirectory = std::move(directory);
+			for (const auto &directory : selected.enabled) {
+				startupExtensionDirectories.push_back(directory.toStdString());
+			}
 		}
 	}
 	obs_frontend_add_tools_menu_item(obs_module_text("BrowserExtension"), manage_browser_extension, nullptr);

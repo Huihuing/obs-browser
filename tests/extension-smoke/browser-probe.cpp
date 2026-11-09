@@ -2,6 +2,7 @@
 #include "browser-app.hpp"
 #include "include/base/cef_callback.h"
 #include "include/wrapper/cef_closure_task.h"
+#include <nlohmann/json.hpp>
 #include <cstdlib>
 #include <iostream>
 #include <string_view>
@@ -55,8 +56,8 @@ public:
 int main(int argc, char **argv)
 {
 	CefRefPtr<ProbeApp> app = new ProbeApp;
-	if (const char *saved = std::getenv("OBS_PROBE_SAVED_EXTENSION")) {
-		app->SetStartupExtension(saved);
+	if (const char *saved = std::getenv("OBS_PROBE_SAVED_EXTENSIONS")) {
+		app->SetStartupExtensions(nlohmann::json::parse(saved).get<std::vector<std::string>>());
 	}
 	if (argc > 1 && std::string_view(argv[1]) == "--check-policy") {
 		auto line = CefCommandLine::CreateCommandLine();

@@ -18,11 +18,12 @@ async function check() {
   }
 
   const deadline = performance.now() + 3000;
-  while (!document.documentElement.dataset.obsProbeWorker && performance.now() < deadline) {
+  const markers = document.documentElement.dataset;
+  while ((!markers.obsProbeWorker || !markers.obsProbeSecond) && performance.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  const {obsProbeContent, obsProbeWorker} = document.documentElement.dataset;
-  const result = `Content script: ${obsProbeContent || "no"} | Worker: ${obsProbeWorker || "no"} | Network rule: ${blocked ? "yes" : "no"}`;
+  const {obsProbeContent, obsProbeWorker, obsProbeSecond} = markers;
+  const result = `Content script: ${obsProbeContent || "no"} | Worker: ${obsProbeWorker || "no"} | Network rule: ${blocked ? "yes" : "no"} | Second: ${obsProbeSecond || "no"}`;
   document.getElementById("result").textContent = document.title = result;
 }
 check().catch((error) => {
