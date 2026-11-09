@@ -21,6 +21,7 @@
 #include <map>
 #include <unordered_map>
 #include <functional>
+#include <vector>
 #include "cef-headers.hpp"
 #include "browser-dummy-client.hpp"
 
@@ -66,6 +67,7 @@ class BrowserApp : public CefApp, public CefRenderProcessHandler, public CefBrow
 
 	typedef std::map<int, CefRefPtr<CefV8Value>> CallbackMap;
 
+	std::vector<std::string> savedExtensionDirectories;
 	bool shared_texture_available;
 	CallbackMap callbackMap;
 	int callbackId;
@@ -82,6 +84,12 @@ public:
 		  wayland(wayland_)
 #endif
 	{
+	}
+
+	static bool IsValidExtensionDirectory(const std::string &directory);
+	void SetStartupExtensions(const std::vector<std::string> &directories)
+	{
+		savedExtensionDirectories = directories;
 	}
 
 	virtual CefRefPtr<CefRenderProcessHandler> GetRenderProcessHandler() override;

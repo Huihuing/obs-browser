@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "OBS Browser local extension probe",
+  "version": "1.0.0",
+  "permissions": ["declarativeNetRequest"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "background": {"service_worker": "worker.js"},
+  "content_scripts": [{
+    "matches": ["http://127.0.0.1/extension-smoke.html"],
+    "js": ["probe.js"],
+    "run_at": "document_end"
+  }],
+  "declarative_net_request": {
+    "rule_resources": [{"id": "probe", "enabled": true, "path": "rules.json"}]
+  }
+}

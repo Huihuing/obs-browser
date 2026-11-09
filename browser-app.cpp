@@ -19,6 +19,8 @@
 #include "browser-app.hpp"
 #include "browser-version.h"
 #include <nlohmann/json.hpp>
+#include <filesystem>
+#include <unordered_set>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -120,7 +122,52 @@ void BrowserApp::OnBeforeChildProcessLaunch(CefRefPtr<CefCommandLine> command_li
 #endif
 }
 
-void BrowserApp::OnBeforeCommandLineProcessing(const CefString &, CefRefPtr<CefCommandLine> command_line)
+bool BrowserApp::IsValidExtensionDirectory(const std::string &directory)
+{
+	const std::filesystem::path path{reinterpret_cast<const char8_t *>(directory.c_str())};
+	std::error_code ec;
+	return path.is_absolute() && directory.find(',') == std::string::npos &&
+	       directory.find('\0') == std::string::npos &&
+	       std::filesystem::is_regular_file(path / "manifest.json", ec);
+}
+
+static void ConfigureExtensions(CefRefPtr<CefCommandLine> command_line, std::vector<std::string> directories)
+{
+#if CHROME_VERSION_MAJOR >= 150
+	command_line->RemoveSwitch("load-extension");
+	command_line->RemoveSwitch("disable-extensions-except");
+	// An explicit launch path replaces the saved checklist, even if that path is invalid.
+	if (command_line->HasSwitch("obs-browser-extension")) {
+		directories = {command_line->GetSwitchValue("obs-browser-extension").ToString()};
+	}
+	if (!command_line->HasSwitch("disable-extensions")) {
+		std::string allowlist;
+		std::unordered_set<std::string> seen;
+		for (const auto &directory : directories) {
+			if (!seen.insert(directory).second) {
+				continue;
+			}
+			if (!BrowserApp::IsValidExtensionDirectory(directory)) {
+				LOG(WARNING) << "Ignoring invalid unpacked extension directory: " << directory;
+				continue;
+			}
+			if (!allowlist.empty()) {
+				allowlist += ',';
+			}
+			allowlist += directory;
+		}
+		if (!allowlist.empty()) {
+			command_line->AppendSwitchWithValue("disable-extensions-except", allowlist);
+			return;
+		}
+	}
+#else
+	(void)directories;
+#endif
+	command_line->AppendSwitch("disable-extensions");
+}
+
+void BrowserApp::OnBeforeCommandLineProcessing(const CefString &process_type, CefRefPtr<CefCommandLine> command_line)
 {
 	if (!shared_texture_available) {
 		bool enableGPU = command_line->HasSwitch("enable-gpu");
@@ -163,7 +210,9 @@ void BrowserApp::OnBeforeCommandLineProcessing(const CefString &, CefRefPtr<CefC
 	}
 
 	command_line->AppendSwitchWithValue("autoplay-policy", "no-user-gesture-required");
-	command_line->AppendSwitch("disable-extensions");
+	if (process_type.empty()) {
+		ConfigureExtensions(command_line, savedExtensionDirectories);
+	}
 	command_line->AppendSwitchWithValue("disable-features", disableFeatures);
 	command_line->AppendSwitch("hide-crash-restore-bubble");
 #ifdef __APPLE__

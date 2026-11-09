@@ -649,13 +649,29 @@ void BrowserClient::OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFram
 	}
 }
 
-void BrowserClient::OnLoadEnd(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, int)
+static bool CanInjectJavaScript(const CefString &initialUrl, const CefString &loadedUrl)
 {
-	if (!valid()) {
+	CefURLParts initial, loaded;
+	if (!CefParseURL(initialUrl, initial) || !CefParseURL(loadedUrl, loaded)) {
+		return false;
+	}
+
+	const CefString scheme(&initial.scheme);
+	if ((scheme != "https" && scheme != "http") || CefString(&initial.origin) != CefString(&loaded.origin)) {
+		return false;
+	}
+
+	// Local files share one synthetic origin. Scope approval to the selected file.
+	return CefString(&initial.host) != "absolute" || CefString(&initial.path) == CefString(&loaded.path);
+}
+
+void BrowserClient::OnLoadEnd(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, int httpStatusCode)
+{
+	if (!valid() || !frame->IsMain()) {
 		return;
 	}
 
-	if (frame->IsMain() && bs->css.length()) {
+	if (bs->css.length()) {
 		std::string uriEncodedCSS = CefURIEncode(bs->css, false).ToString();
 
 		std::string script;
@@ -666,6 +682,11 @@ void BrowserClient::OnLoadEnd(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, 
 		script += "document.querySelector('head').appendChild(obsCSS);";
 
 		frame->ExecuteJavaScript(script, "", 0);
+	}
+
+	if (!javascript.empty() && httpStatusCode >= 200 && httpStatusCode < 400 &&
+	    CanInjectJavaScript(initialUrl, frame->GetURL())) {
+		frame->ExecuteJavaScript(javascript, "obs-custom-javascript.js", 1);
 	}
 }
 

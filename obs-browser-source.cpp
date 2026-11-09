@@ -188,7 +188,7 @@ void BrowserSource::ExecuteOnBrowser(BrowserFunc func, bool async)
 
 bool BrowserSource::CreateBrowser()
 {
-	return QueueCEFTask([this]() {
+	return QueueCEFTask([this, initialUrl = url, script = javascript, controlLevel = webpage_control_level]() {
 #ifdef ENABLE_BROWSER_SHARED_TEXTURE
 		if (hwaccel) {
 			obs_enter_graphics();
@@ -203,8 +203,8 @@ bool BrowserSource::CreateBrowser()
 		bool hwaccel = false;
 #endif
 
-		CefRefPtr<BrowserClient> browserClient =
-			new BrowserClient(this, hwaccel && tex_sharing_avail, reroute_audio, webpage_control_level);
+		CefRefPtr<BrowserClient> browserClient = new BrowserClient(
+			this, hwaccel && tex_sharing_avail, reroute_audio, controlLevel, initialUrl, script);
 
 		CefWindowInfo windowInfo;
 		windowInfo.bounds.width = width;
@@ -238,8 +238,9 @@ bool BrowserSource::CreateBrowser()
 		cefBrowserSettings.default_font_size = 16;
 		cefBrowserSettings.default_fixed_font_size = 16;
 
-		auto browser = CefBrowserHost::CreateBrowserSync(windowInfo, browserClient, url, cefBrowserSettings,
-								 CefRefPtr<CefDictionaryValue>(), nullptr);
+		auto browser = CefBrowserHost::CreateBrowserSync(windowInfo, browserClient, initialUrl,
+								 cefBrowserSettings, CefRefPtr<CefDictionaryValue>(),
+								 nullptr);
 
 		SetBrowser(browser);
 
@@ -479,6 +480,7 @@ void BrowserSource::Update(obs_data_t *settings)
 		ControlLevel n_webpage_control_level;
 		std::string n_url;
 		std::string n_css;
+		const std::string n_javascript = GetApprovedJavaScript(settings);
 
 		n_is_local = obs_data_get_bool(settings, "is_local_file");
 		n_width = (int)obs_data_get_int(settings, "width");
@@ -519,7 +521,8 @@ void BrowserSource::Update(obs_data_t *settings)
 
 		if (n_is_local == is_local && n_fps_custom == fps_custom && n_fps == fps &&
 		    n_shutdown == shutdown_on_invisible && n_restart == restart && n_css == css && n_url == url &&
-		    n_reroute == reroute_audio && n_webpage_control_level == webpage_control_level) {
+		    n_javascript == javascript && n_reroute == reroute_audio &&
+		    n_webpage_control_level == webpage_control_level) {
 
 			if (n_width == width && n_height == height) {
 				return;
@@ -549,6 +552,7 @@ void BrowserSource::Update(obs_data_t *settings)
 		webpage_control_level = n_webpage_control_level;
 		restart = n_restart;
 		css = n_css;
+		javascript = n_javascript;
 		url = n_url;
 
 		obs_source_set_audio_active(source, reroute_audio);

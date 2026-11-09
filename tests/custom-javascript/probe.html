@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Browser Source JavaScript smoke test</title>
+<style>
+  body { background: #17202a; color: white; font: 22px sans-serif; padding: 1em; }
+  output { display: block; margin-top: 0.6em; }
+  iframe { display: none; }
+</style>
+<h1>Custom JavaScript</h1>
+<output id="result">Waiting for page load</output>
+<iframe id="child" srcdoc="<!doctype html><title>Child frame</title>"></iframe>
+<script>
+  const result = document.getElementById("result");
+  const child = document.getElementById("child");
+  function update() {
+    const mainRuns = Number(document.documentElement.dataset.runs || 0);
+    const childRuns = Number(child.contentDocument.documentElement.dataset.runs || 0);
+    const status = mainRuns === 0 && childRuns === 0 ? "Idle" :
+                   mainRuns === 1 && childRuns === 0 ? "Pass" : "Fail";
+    result.textContent = `${status} · main ${mainRuns} · child ${childRuns}`;
+    document.title = result.textContent;
+  }
+  window.addEventListener("load", () => {
+    for (const root of [document.documentElement, child.contentDocument.documentElement]) {
+      new MutationObserver(update).observe(root, { attributes: true, attributeFilter: ["data-runs"] });
+    }
+    update();
+  });
+</script>
+</html>

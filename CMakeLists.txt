@@ -10,6 +10,7 @@ if(NOT ENABLE_BROWSER)
 endif()
 
 find_package(CEF 95 REQUIRED)
+find_package(Qt6 REQUIRED COMPONENTS Widgets)
 find_package(nlohmann_json 3.11 REQUIRED)
 
 add_library(obs-browser MODULE)
@@ -46,7 +47,9 @@ target_sources(
 target_include_directories(obs-browser PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/deps")
 
 target_compile_features(obs-browser PRIVATE cxx_std_20)
-target_link_libraries(obs-browser PRIVATE OBS::libobs OBS::frontend-api OBS::websocket-api nlohmann_json::nlohmann_json)
+target_link_libraries(
+  obs-browser PRIVATE OBS::libobs OBS::frontend-api OBS::websocket-api Qt::Widgets nlohmann_json::nlohmann_json
+)
 
 if(OS_WINDOWS)
   include(cmake/os-windows.cmake)
