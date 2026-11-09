@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.28)
+project(obs-browser-review-test LANGUAGES CXX)
+find_package(libobs CONFIG REQUIRED)
+find_package(Qt6 REQUIRED COMPONENTS Widgets)
+add_executable(review-test review.cpp)
+set_target_properties(review-test PROPERTIES ENABLE_EXPORTS ON)
+target_link_libraries(review-test PRIVATE OBS::libobs Qt6::Widgets)

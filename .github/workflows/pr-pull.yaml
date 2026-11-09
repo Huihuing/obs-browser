@@ -18,3 +18,20 @@ jobs:
     uses: ./.github/workflows/check-format.yaml
     permissions:
       contents: read
+
+  fork-extension-smoke:
+    if: github.repository == 'Huihuing/obs-browser'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: Huihuing/obs-studio
+          ref: master
+          path: studio-preset
+          sparse-checkout: CMakePresets.json
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - run: bash tests/extension-smoke/ci-linux.sh studio-preset/CMakePresets.json

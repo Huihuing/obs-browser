@@ -1,5 +1,7 @@
 // Exercise the fork's BrowserApp with the same windowless, global-context browser used by Browser Source.
 #include "browser-app.hpp"
+#include "include/base/cef_callback.h"
+#include "include/wrapper/cef_closure_task.h"
 #include <cstdlib>
 #include <iostream>
 #include <string_view>
@@ -15,10 +17,18 @@ public:
 	{
 		if (title.ToString().starts_with("Content script:")) {
 			std::cout << title.ToString() << std::endl;
-			browser->GetHost()->CloseBrowser(true);
+			// Chromium is notifying WebContents observers in this callback.
+			CefPostTask(TID_UI, base::BindOnce([](CefRefPtr<CefBrowser> finished) {
+				finished->GetHost()->WasHidden(true);
+				finished->GetHost()->CloseBrowser(true);
+			}, browser));
 		}
 	}
-	void OnBeforeClose(CefRefPtr<CefBrowser>) override { CefQuitMessageLoop(); }
+	void OnBeforeClose(CefRefPtr<CefBrowser>) override
+	{
+		std::cerr << "Probe browser closed" << std::endl;
+		CefQuitMessageLoop();
+	}
 
 	IMPLEMENT_REFCOUNTING(ProbeClient);
 };
@@ -64,7 +74,8 @@ int main(int argc, char **argv)
 	if (!CefInitialize(args, settings, app, nullptr))
 		return 1;
 	CefRunMessageLoop();
-	app = nullptr;
+	std::cerr << "Probe shutting down CEF" << std::endl;
 	CefShutdown();
+	app = nullptr;
 	return 0;
 }

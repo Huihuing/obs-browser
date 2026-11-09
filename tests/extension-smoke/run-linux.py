@@ -23,7 +23,7 @@ def build(cef, destination):
                 link.symlink_to(item)
     exe = destination / "obs-browser-probe"
     subprocess.run([
-        "g++", "-std=c++20", "-O1", "-DUSE_X11", "-I", str(REPO), "-I", str(cef),
+        "g++", "-std=c++20", "-O1", "-DNDEBUG", "-DUSE_X11", "-I", str(REPO), "-I", str(cef),
         str(FIXTURE / "browser-probe.cpp"), str(REPO / "browser-app.cpp"),
         str(REPO / "browser-dummy-client.cpp"),
         str(cef / "build/libcef_dll_wrapper/libcef_dll_wrapper.a"),
@@ -52,6 +52,7 @@ def check_policy(exe, extension):
 
 
 def check_osr(exe, extension, profile):
+    failures = []
     handler = partial(SimpleHTTPRequestHandler, directory=str(FIXTURE / "site"))
     with ThreadingHTTPServer(("127.0.0.1", 0), handler) as server:
         Thread(target=server.serve_forever, daemon=True).start()
@@ -70,11 +71,14 @@ def check_osr(exe, extension, profile):
             match = re.search(r"^Content script: (yes|no) \| Worker: (yes|no) \| Network rule: (yes|no)$",
                               run.stdout, re.MULTILINE)
             if not match or run.returncode:
-                raise RuntimeError(f"{name}: CEF exit {run.returncode}\n{run.stdout}")
+                failures.append(f"{name}: CEF exit {run.returncode}\n{run.stdout}")
+                continue
             print(f"{name}: {match[0]}", flush=True)
             if (enabled and match[3] != "yes") or (not enabled and match.groups() != ("no", "no", "no")):
-                raise RuntimeError(f"Unexpected result in {name}: {match[0]}")
+                failures.append(f"Unexpected result in {name}: {match[0]}")
         server.shutdown()
+    if failures:
+        raise RuntimeError("\n".join(failures))
 
 
 if __name__ == "__main__":
